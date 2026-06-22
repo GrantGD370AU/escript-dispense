@@ -1,0 +1,16 @@
+name = "gu-escript-dispense"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# IMPORTANT: this must be the SAME database_id as the prescribing app.
+# Both apps share one D1 database. Get the id from:
+#   Cloudflare dashboard → Workers & Pages → D1 → escript-emulator → Settings
+[[d1_databases]]
+binding = "DB"
+database_name = "escript-emulator"
+database_id = "REPLACE_WITH_YOUR_SHARED_D1_DATABASE_ID"
+migrations_dir = "migrations"
