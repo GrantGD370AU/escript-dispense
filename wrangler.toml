@@ -12,5 +12,5 @@ binding = "ASSETS"
 [[d1_databases]]
 binding = "DB"
 database_name = "escript-emulator"
-database_id = "REPLACE_WITH_YOUR_SHARED_D1_DATABASE_ID"
+database_id = "ae01cfec-5dc6-4772-bb86-5fac0d59b745"
 migrations_dir = "migrations"
