@@ -2,16 +2,58 @@
 // Pharmacist login gate → dispense screen. Same-origin Worker API, shared D1.
 
 const $ = (id) => document.getElementById(id);
-const api = (path, opts) => fetch(path, opts).then(async (r) => {
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-  return data;
-});
+
+// Session token from the access-code gate. In-memory only — refresh clears it.
+let sessionToken = null;
+
+const api = (path, opts = {}) => {
+  const headers = { ...(opts.headers || {}) };
+  if (sessionToken) headers["Authorization"] = "Bearer " + sessionToken;
+  return fetch(path, { ...opts, headers }).then(async (r) => {
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401 && sessionToken) forceReauth();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    return data;
+  });
+};
+
+function forceReauth() {
+  sessionToken = null;
+  pharmacist = null;
+  $("appScreen").style.display = "none";
+  $("loginScreen").style.display = "none";
+  $("codeScreen").style.display = "block";
+}
 
 let pharmacist = null;
 let currentRx = null;
 
-// ---- Login gate -----------------------------------------------------------
+// ---- Access-code gate (first) ---------------------------------------------
+
+async function submitCode() {
+  const code = $("accessCode").value;
+  if (!code) { setMsg("codeMsg", "error", "Enter the access code."); return; }
+  setMsg("codeMsg", "ok", "Checking…");
+  try {
+    const res = await fetch("/api/auth", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setMsg("codeMsg", "error", data.error || "Incorrect access code"); return; }
+    sessionToken = data.token;
+    $("accessCode").value = "";
+    setMsg("codeMsg", "ok", "");
+    $("codeScreen").style.display = "none";
+    $("loginScreen").style.display = "block";
+    $("loginName").focus();
+  } catch (e) {
+    setMsg("codeMsg", "error", "Could not verify: " + e.message);
+  }
+}
+
+// ---- Name login (second) --------------------------------------------------
 
 function showApp() {
   $("loginScreen").style.display = "none";
@@ -24,23 +66,14 @@ function signIn() {
   const name = $("loginName").value.trim();
   if (!name) { setMsg("loginMsg", "error", "Enter your pharmacist name."); return; }
   pharmacist = name;
-  sessionStorage.setItem("pharmacist", name);
   showApp();
 }
 
 function signOut() {
-  pharmacist = null;
-  sessionStorage.removeItem("pharmacist");
-  $("appScreen").style.display = "none";
-  $("loginScreen").style.display = "block";
+  forceReauth();
   $("loginName").value = "";
   $("rxCard").style.display = "none";
   setMsg("loginMsg", "ok", "");
-}
-
-function restoreSession() {
-  const saved = sessionStorage.getItem("pharmacist");
-  if (saved) { pharmacist = saved; showApp(); }
 }
 
 function setMsg(id, kind, text) {
@@ -113,11 +146,13 @@ async function dispense() {
 
 // ---- Wiring ---------------------------------------------------------------
 
+$("codeBtn").onclick = submitCode;
 $("loginBtn").onclick = signIn;
 $("signoutBtn").onclick = signOut;
 $("lookupBtn").onclick = lookup;
 $("dispenseBtn").onclick = dispense;
+$("accessCode").addEventListener("keydown", (e) => { if (e.key === "Enter") submitCode(); });
 $("loginName").addEventListener("keydown", (e) => { if (e.key === "Enter") signIn(); });
 $("dispToken").addEventListener("keydown", (e) => { if (e.key === "Enter") lookup(); });
 
-restoreSession();
+// Always start at the access-code screen (no persistence across refresh).

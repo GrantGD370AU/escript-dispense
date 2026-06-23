@@ -73,8 +73,22 @@
 </header>
 
 <main>
-  <!-- ===== Login screen ===== -->
-  <div id="loginScreen" class="login-wrap">
+  <!-- ===== Access-code screen (first gate) ===== -->
+  <div id="codeScreen" class="login-wrap">
+    <section class="card">
+      <h2>Access code</h2>
+      <p>This dispensing system is restricted. Enter the access code provided by your facilitator.</p>
+      <label for="accessCode">Access code</label>
+      <input id="accessCode" type="password" placeholder="Enter code" autocomplete="off" />
+      <div class="actions">
+        <button id="codeBtn">Continue</button>
+      </div>
+      <div class="msg" id="codeMsg"></div>
+    </section>
+  </div>
+
+  <!-- ===== Login screen (second gate: name) ===== -->
+  <div id="loginScreen" class="login-wrap" style="display:none">
     <section class="card">
       <h2>Pharmacist sign-in</h2>
       <p>Sign in to dispense prescriptions. Your name is recorded against each dispensing event.</p>

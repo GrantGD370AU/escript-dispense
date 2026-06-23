@@ -18,6 +18,79 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+// ---- Access-code gate -----------------------------------------------------
+// All /api/* endpoints (except /api/auth itself) require a valid session token.
+// The session token is an HMAC over an expiry timestamp, signed with the
+// per-app ACCESS_CODE secret. This lets the Worker verify statelessly: a token
+// is only forgeable by someone who knows the secret. ACCESS_CODE is set as a
+// Cloudflare secret (never in the repo or the frontend).
+
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h ceiling; frontend forgets on refresh anyway
+
+function b64url(bytes) {
+  let s = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+  return s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function hmac(secret, msg) {
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
+  return b64url(sig);
+}
+
+// Constant-time string compare to avoid timing leaks on the code/signature.
+function safeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
+}
+
+async function issueSession(secret) {
+  const exp = String(Date.now() + SESSION_TTL_MS);
+  const sig = await hmac(secret, exp);
+  return `${exp}.${sig}`;
+}
+
+async function verifySession(secret, token) {
+  if (!token) return false;
+  const dot = token.indexOf(".");
+  if (dot < 0) return false;
+  const exp = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  if (!/^\d+$/.test(exp)) return false;
+  if (Date.now() > Number(exp)) return false;
+  const expect = await hmac(secret, exp);
+  return safeEqual(sig, expect);
+}
+
+// POST /api/auth  { code }  → { token } | 401
+async function handleAuth(request, env) {
+  const secret = env.ACCESS_CODE;
+  if (!secret) return json({ error: "Access control not configured" }, 500);
+  let body = {};
+  try { body = await request.json(); } catch { /* empty */ }
+  const code = (body.code || "").toString();
+  if (!code || !safeEqual(code, secret)) {
+    return json({ error: "Incorrect access code" }, 401);
+  }
+  return json({ token: await issueSession(secret) });
+}
+
+async function requireAuth(request, env) {
+  const secret = env.ACCESS_CODE;
+  if (!secret) return json({ error: "Access control not configured" }, 500);
+  const auth = request.headers.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (!(await verifySession(secret, token))) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  return null; // ok
+}
+
 // Token format mirrors the original: ESIM-<12 hex chars, uppercase>
 function makeToken() {
   const bytes = new Uint8Array(6);
@@ -255,6 +328,13 @@ async function reset(env) {
 async function handleApi(request, env, url) {
   const path = url.pathname;
   const method = request.method;
+
+  // Public: the auth endpoint itself.
+  if (method === "POST" && path === "/api/auth") return handleAuth(request, env);
+
+  // Everything else under /api/* requires a valid session.
+  const denied = await requireAuth(request, env);
+  if (denied) return denied;
 
   if (method === "GET" && path === "/api/patients") return getPatients(env);
   if (method === "GET" && path === "/api/medicines") return getMedicines(env, url);
